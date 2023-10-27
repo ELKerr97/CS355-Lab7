@@ -1,6 +1,7 @@
 # Import a library of functions called 'pygame'
 import pygame
-from math import pi
+import math
+import numpy as np
 
 class Point:
     def __init__(self,x,y):
@@ -188,10 +189,119 @@ done = False
 clock = pygame.time.Clock()
 start = Point(0.0,0.0)
 end = Point(0.0,0.0)
-cam_x, cam_y, cam_z, cam_angle = -40.0, -10.0, -25.0, -48.0
+cam_x, cam_y, cam_z, cam_angle = -40.0, 15.0, -25.0, -48.0
+look_x, look_y, look_z = 0, 0, 1
+up = np.array([0,1,0])
 car_x, car_y, car_z = 0.0, 0.0, 0.0
 wheel_x_offset, wheel_rot_offset = 0.0, 0.0
-linelist = loadHouse()
+move_speed = 1.0
+rotate_speed = 1.0
+house_lines = []
+
+# Load all houses to house
+def create_house_transformation_m(x,y,z,angle):
+    translation = np.array([[1, 0, 0, x],
+                            [0, 1, 0, y],
+                            [0, 0, 1, z],
+                            [0, 0, 0, 1]])
+    
+    rad = math.radians(angle)
+
+    rotation = np.array([[math.cos(rad), 0, -math.sin(rad), 0],
+                         [0,             1, 0,              0],
+                         [math.sin(rad), 0, math.cos(rad),  0],
+                         [0,             0, 0,              1]])
+    
+    return translation @ rotation
+
+def create_house(x, y, z, angle, lines):
+    house = loadHouse()
+    trans_matrix = create_house_transformation_m(x, y, z, angle)
+
+    for line in house:
+        line.start = trans_matrix @ np.array([line.start.x, line.start.y, line.start.z, 1])
+        line.end = trans_matrix @ np.array([line.end.x, line.end.y, line.end.z, 1])
+        lines.append(Line3D(Point3D(line.start[0], line.start[1], line.start[2]), Point3D(line.end[0], line.end[1], line.end[2])))
+
+# Add houses
+create_house(0, 0, 0, 0, house_lines)
+create_house(20, 0, 0, 0, house_lines)
+create_house(40, 0, 0, 0, house_lines)
+create_house(0, 0, 40, 180, house_lines)
+create_house(20, 0, 40, 180, house_lines)
+create_house(40, 0, 40, 180, house_lines)
+
+# Add car lines
+def create_car(x, y, z, lines):
+    car = loadCar()
+    trans_matrix = np.array([[1, 0, 0, x],
+                            [0, 1, 0, y],
+                            [0, 0, 1, z],
+                            [0, 0, 0, 1]])
+    
+    for line in car:
+        line.start = trans_matrix @ np.array([line.start.x, line.start.y, line.start.z, 1])
+        line.end = trans_matrix @ np.array([line.end.x, line.end.y, line.end.z, 1])
+        lines.append(Line3D(Point3D(line.start[0], line.start[1], line.start[2]), Point3D(line.end[0], line.end[1], line.end[2])))
+
+create_car(0, 0, 10, house_lines)
+
+
+def magnitude(vector): 
+    return math.sqrt(sum(pow(element, 2) for element in vector))
+
+def world_to_camera_matrix(cam_x, cam_y, cam_z, look_x, look_y, look_z):
+    translation = np.array([[1, 0, 0, -cam_x],
+                            [0, 1, 0, -cam_y],
+                            [0, 0, 1, -cam_z],
+                            [0, 0, 0, 1]])
+    
+    fr = np.array([cam_x, cam_y, cam_z])
+    at = np.array([cam_x + look_x, cam_y, cam_z + look_z])
+    
+    z = np.subtract(at, fr)/(magnitude(np.subtract(at,fr)))
+    x = np.cross(z,up)/magnitude(np.cross(z,up))
+    y = np.cross(x,z)/magnitude(np.cross(x,z))
+    
+    rotation = np.array([[x[0], x[1], x[2], 0],
+                         [y[0], y[1], y[2], 0],
+                         [z[0], z[1], z[2], 0],
+                         [0,    0,    0,    1]])
+    
+    return rotation @ translation
+
+def clip_matrix(fov):
+    rad = math.radians(fov)
+    zoomx = 1.0 / math.tan(rad/2)
+    ar = size[0]/size[1]
+    zoomy = ar * zoomx
+    n = 0.1
+    f = 300.0
+
+    cmatrix = np.array([[zoomx, 0, 0, 0],
+                        [0, zoomy, 0, 0],
+                        [0, 0, (f+n)/(f-n), (-2*n*f)/(f-n)],
+                        [0, 0, 1, 0]])
+    return cmatrix
+
+def should_clip(point):
+    w = point[3]
+    for p in point[:3]:
+        if p <= -w or p >= w:
+            return True
+    return False
+
+def viewport_transf_m(w, h):
+    return np.array([[w/2, 0, w/2],
+                    [0, -h/2, h/2],
+                    [0, 0, 1]])
+
+# Generate matrices
+fov = 45
+clip_m = clip_matrix(fov) # clip matrix
+w_to_c_m = world_to_camera_matrix(cam_x, cam_y, cam_z, look_x, look_y, look_z) # world to camera matrix
+width, height = size[0], size[1]
+viewport_transf = viewport_transf_m(width, height)
 
 #Loop until the user clicks the close button.
 while not done:
@@ -214,46 +324,75 @@ while not done:
 
     if pressed[pygame.K_w]:
         # Move forward
-        print("w is pressed")
+        cam_x += move_speed * math.sin(math.radians(-cam_angle))
+        cam_z += move_speed * math.cos(math.radians(-cam_angle))
 
     elif pressed[pygame.K_a]:
         # Move left
-        print("a is pressed")
+        cam_x += move_speed * math.cos(math.radians(-cam_angle))
+        cam_z -= move_speed * math.sin(math.radians(-cam_angle))
 
     elif pressed[pygame.K_s]:
         # Move back
-        print("s is pressed")
+        cam_x -= move_speed * math.sin(math.radians(-cam_angle))
+        cam_z -= move_speed * math.cos(math.radians(-cam_angle))
 
     elif pressed[pygame.K_d]:
         # Move right
-        print("d is pressed")
+        cam_x -= move_speed * math.cos(math.radians(-cam_angle))
+        cam_z += move_speed * math.sin(math.radians(-cam_angle))
 
     elif pressed[pygame.K_r]:
         # Move up
-        print("r is pressed")
+        cam_y += move_speed
     
     elif pressed[pygame.K_f]:
         # Move down
-        print("f is pressed")
+        cam_y -= move_speed
 
     elif pressed[pygame.K_q]:
         # Look left
-        print("q is pressed")
+        cam_angle -= rotate_speed
 
     elif pressed[pygame.K_e]:
         # Look right
-        print("e is pressed")
+        cam_angle += rotate_speed
+
+    elif pressed[pygame.K_h]:
+        cam_x, cam_y, cam_z, cam_angle = -40.0, 10.0, -25.0, -48.0
 
     #Viewer Code#
     #####################################################################
 
-    for s in linelist:
+    look_x = math.sin(math.radians(-cam_angle))
+    look_z = math.cos(math.radians(-cam_angle)) 
+    w_to_c_m = world_to_camera_matrix(cam_x, cam_y, cam_z, look_x, look_y, look_z) # world to camera matrix
+
+    for s in house_lines:
+        # Apply world-to-camera transformation
+        w_to_c_start = w_to_c_m @ np.array([s.start.x, s.start.y, s.start.z, s.start.w])
+        w_to_c_end = w_to_c_m @ np.array([s.end.x, s.end.y, s.end.z, s.end.w])
+
+        # Apply clip matrix
+        clip_start = clip_m @ w_to_c_start
+        clip_end = clip_m @ w_to_c_end
+
+        # Clipping test
+        # TODO: Add near plane test
+        if should_clip(clip_start) and should_clip(clip_end):
+            continue
+        
+        # Normalize the points (divide by w)
+        clip_start = clip_start / clip_start[3]
+        clip_end = clip_end / clip_end[3]
+
+        st = viewport_transf @ np.array([clip_start[0], clip_start[1], 1])
+        en = viewport_transf @ np.array([clip_end[0], clip_end[1], 1])
+
         #BOGUS DRAWING PARAMETERS SO YOU CAN SEE THE HOUSE WHEN YOU START UP
-        pygame.draw.line(screen, BLUE, (20*s.start.x+200, -20*s.start.y+200), (20*s.end.x+200, -20*s.end.y+200))
+        pygame.draw.line(screen, BLUE, (st[0], st[1]), (en[0], en[1]))
 
     # Add houses and car
-
-    # For each line, 
 
     # Go ahead and update the screen with what we've drawn.
     # This MUST happen after all the other drawing commands.
