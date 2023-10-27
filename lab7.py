@@ -192,11 +192,13 @@ end = Point(0.0,0.0)
 cam_x, cam_y, cam_z, cam_angle = -40.0, 15.0, -25.0, -48.0
 look_x, look_y, look_z = 0, 0, 1
 up = np.array([0,1,0])
-car_x, car_y, car_z = 0.0, 0.0, 0.0
+car_x, car_y, car_z = 0.0, 0.0, 10.0
 wheel_x_offset, wheel_rot_offset = 0.0, 0.0
 move_speed = 1.0
 rotate_speed = 1.0
 house_lines = []
+car_lines = []
+tire_lines = []
 
 # Load all houses to house
 def create_house_transformation_m(x,y,z,angle):
@@ -244,7 +246,35 @@ def create_car(x, y, z, lines):
         line.end = trans_matrix @ np.array([line.end.x, line.end.y, line.end.z, 1])
         lines.append(Line3D(Point3D(line.start[0], line.start[1], line.start[2]), Point3D(line.end[0], line.end[1], line.end[2])))
 
-create_car(0, 0, 10, house_lines)
+def create_tire(x, y, z, lines):
+    wheel = loadTire()
+    trans_matrix = np.array([[1, 0, 0, x],
+                            [0, 1, 0, y],
+                            [0, 0, 1, z],
+                            [0, 0, 0, 1]])
+    
+    for line in wheel:
+        line.start = trans_matrix @ np.array([line.start.x, line.start.y, line.start.z, 1])
+        line.end = trans_matrix @ np.array([line.end.x, line.end.y, line.end.z, 1])
+        lines.append(Line3D(Point3D(line.start[0], line.start[1], line.start[2]), Point3D(line.end[0], line.end[1], line.end[2])))
+
+create_car(car_x, car_y, car_z, car_lines)
+
+
+def move_car(x, y, z, lines):
+    new_lines = []
+
+    car_transf_m = np.array([[1, 0, 0, x],
+                        [0, 1, 0, y],
+                        [0, 0, 1, z],
+                        [0, 0, 0, 1]])
+    
+    for line in lines:
+        line.start = car_transf_m @ np.array([line.start.x, line.start.y, line.start.z, 1])
+        line.end = car_transf_m @ np.array([line.end.x, line.end.y, line.end.z, 1])
+        new_lines.append(Line3D(Point3D(line.start[0], line.start[1], line.start[2]), Point3D(line.end[0], line.end[1], line.end[2])))
+    
+    return new_lines
 
 
 def magnitude(vector): 
@@ -369,6 +399,7 @@ while not done:
     w_to_c_m = world_to_camera_matrix(cam_x, cam_y, cam_z, look_x, look_y, look_z) # world to camera matrix
 
     for s in house_lines:
+
         # Apply world-to-camera transformation
         w_to_c_start = w_to_c_m @ np.array([s.start.x, s.start.y, s.start.z, s.start.w])
         w_to_c_end = w_to_c_m @ np.array([s.end.x, s.end.y, s.end.z, s.end.w])
@@ -391,6 +422,33 @@ while not done:
 
         #BOGUS DRAWING PARAMETERS SO YOU CAN SEE THE HOUSE WHEN YOU START UP
         pygame.draw.line(screen, BLUE, (st[0], st[1]), (en[0], en[1]))
+
+    
+    for s in car_lines:
+        # Apply world-to-camera transformation
+        w_to_c_start = w_to_c_m @ np.array([s.start.x, s.start.y, s.start.z, s.start.w])
+        w_to_c_end = w_to_c_m @ np.array([s.end.x, s.end.y, s.end.z, s.end.w])
+
+        # Apply clip matrix
+        clip_start = clip_m @ w_to_c_start
+        clip_end = clip_m @ w_to_c_end
+
+        # Clipping test
+        # TODO: Add near plane test
+        if should_clip(clip_start) and should_clip(clip_end):
+            continue
+        
+        # Normalize the points (divide by w)
+        clip_start = clip_start / clip_start[3]
+        clip_end = clip_end / clip_end[3]
+
+        st = viewport_transf @ np.array([clip_start[0], clip_start[1], 1])
+        en = viewport_transf @ np.array([clip_end[0], clip_end[1], 1])
+
+        #BOGUS DRAWING PARAMETERS SO YOU CAN SEE THE HOUSE WHEN YOU START UP
+        pygame.draw.line(screen, RED, (st[0], st[1]), (en[0], en[1]))
+    
+    car_lines = move_car(0.03, 0, 0, car_lines)
 
     # Add houses and car
 
